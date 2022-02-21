@@ -15,10 +15,12 @@ class AIC2020Track2(Dataset):
                            for image_path in image_name]
 
         labels = list(map(int, labels))
-        labels_set = set(labels)
-        labels_mapping = {k: i for i, k in enumerate(labels_set)}
-        
+
+        # labels_set = set(labels)
+        # labels_mapping = {k: i for i, k in enumerate(labels_set)}
+
         labels = torch.tensor([x for x in labels])
+        self.nclasses = len(torch.unique(labels))
 
         self.transform = tvtf.Compose([
             tvtf.Resize((224, 224)),

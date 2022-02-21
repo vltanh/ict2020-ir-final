@@ -2,19 +2,33 @@ import torchvision
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-from torchvision import transforms
-from pytorch_metric_learning import distances, losses, miners, reducers, testers
+from torch.utils.tensorboard import SummaryWriter
+from pytorch_metric_learning import losses, miners, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
+from dataloaders import BalancedBatchDataLoader
 
 from datasets import AIC2020Track2
-import os
 import sys
+import datetime
+
+from utils import set_deterministic, set_seed
+
+SEED = 3698
+set_deterministic()
 
 loss = sys.argv[1]
+margin = float(sys.argv[2])
+gamma = float(sys.argv[3])
+pos_level = sys.argv[4]
+neg_level = sys.argv[5]
 
-### MNIST code originally from https://github.com/pytorch/examples/blob/master/mnist/main.py ###
-def train(model, loss_func, mining_func, device, train_loader, optimizer, epoch):
+date = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+outdir = f'runs/{loss}_{margin}_{gamma}_{pos_level}_{neg_level}_{date}'
+writer = SummaryWriter(outdir)
+
+
+def train(model, loss_func, mining_func, device, train_loader, optimizer, epoch, writer):
     model.train()
     for batch_idx, (data, labels) in enumerate(train_loader):
         data, labels = data.to(device), labels.to(device)
@@ -24,21 +38,15 @@ def train(model, loss_func, mining_func, device, train_loader, optimizer, epoch)
         loss = loss_func(embeddings, labels, indices_tuple)
         loss.backward()
         optimizer.step()
-        if batch_idx % 20 == 0:
-            print(
-                "Epoch {} Iteration {}: Loss = {}, Number of mined triplets = {}".format(
-                    epoch, batch_idx, loss, mining_func.num_triplets
-                ), flush=True
-            )
+        writer.add_scalar('Training Loss', loss.detach().cpu(),
+                          epoch * len(train_loader) + batch_idx)
 
 
-### convenient function from pytorch-metric-learning ###
 def get_all_embeddings(dataset, model):
     tester = testers.BaseTester()
     return tester.get_all_embeddings(dataset, model)
 
 
-### compute accuracy using AccuracyCalculator from pytorch-metric-learning ###
 def test(train_set, test_set, model, accuracy_calculator):
     train_embeddings, train_labels = get_all_embeddings(train_set, model)
     test_embeddings, test_labels = get_all_embeddings(test_set, model)
@@ -49,81 +57,93 @@ def test(train_set, test_set, model, accuracy_calculator):
         test_embeddings, train_embeddings, test_labels, train_labels, False
     )
     print(
-        "Test set accuracy (Precision@1) = {}".format(accuracies["precision_at_1"])
+        "Test set accuracy (Precision@1) = {}".format(
+            accuracies["precision_at_1"])
     )
     print(
-        "Test set MAP = {}".format(accuracies["mean_average_precision"])
+        "Test set MAP = {}".format(accuracies["mean_average_precision_at_r"])
     )
-    return accuracies["precision_at_1"], accuracies['mean_average_precision']
+    return accuracies["precision_at_1"], accuracies['mean_average_precision_at_r']
 
 
 device = torch.device("cuda")
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
-])
-
-batch_size = 256
-
 print('Loading data... ', end='', flush=True)
+set_seed(SEED)
 train_ds = AIC2020Track2(
     'data/AIC21_Track2_ReID/image_train', 'list/reid_train.csv', True)
+train_dl = BalancedBatchDataLoader(train_ds, 128, 4)
+
+set_seed(SEED)
 gallery_ds = AIC2020Track2(
     'data/AIC21_Track2_ReID/image_train', 'list/reid_gallery_val.csv', False)
+gallery_dl = torch.utils.data.DataLoader(gallery_ds, batch_size=256)
+
+set_seed(SEED)
 query_ds = AIC2020Track2(
     'data/AIC21_Track2_ReID/image_train', 'list/reid_query_val.csv', False)
-
-train_dl = torch.utils.data.DataLoader(train_ds, batch_size=256, shuffle=True)
-gallery_dl = torch.utils.data.DataLoader(gallery_ds, batch_size=256)
 query_dl = torch.utils.data.DataLoader(query_ds, batch_size=256)
 print('Done!', flush=True)
 
 print('Loading model... ', end='', flush=True)
+set_seed(SEED)
 model = torchvision.models.resnet18(pretrained=True)
+model.emb_dim = model.fc.in_features
 model.fc = nn.Identity()
 model = model.to(device)
 print('Done!', flush=True)
 
 print('Loading optimizer... ', end='', flush=True)
-optimizer = optim.Adam(model.parameters(), lr=0.01)
+set_seed(SEED)
+optimizer = optim.Adam(model.parameters(), lr=5e-5)
 print('Done!', flush=True)
 
-num_epochs = 50
+num_epochs = 25
 
-### pytorch-metric-learning stuff ###
-distance = distances.CosineSimilarity()
-reducer = reducers.ThresholdReducer(low=0)
-
+set_seed(SEED)
 if loss == 'triplet':
-    loss_func = losses.TripletMarginLoss(
-        margin=0.2, distance=distance, reducer=reducer)
+    loss_func = losses.TripletMarginLoss(margin=margin)
 elif loss == 'circle':
-    loss_func = losses.CircleLoss(m=0.2, distance=distance, reducer=reducer)
+    loss_func = losses.CircleLoss(m=margin, gamma=gamma)
+elif loss == 'am':
+    loss_func = losses.CosFaceLoss(
+        num_classes=train_ds.nclasses, embedding_size=model.emb_dim, margin=margin, scale=gamma)
 
-mining_func = miners.TripletMarginMiner(
-    margin=0.2, distance=distance, type_of_triplets="semihard"
+set_seed(SEED)
+mining_func = miners.BatchEasyHardMiner(
+    pos_strategy=pos_level,
+    neg_strategy=neg_level,
 )
-accuracy_calculator = AccuracyCalculator(include=(), k=1)
-### pytorch-metric-learning stuff ###
 
-outdir = f'runs/{loss}_loss'
-os.makedirs(outdir, exist_ok=True)
+set_seed(SEED)
+accuracy_calculator = AccuracyCalculator(
+    include=('precision_at_1', 'mean_average_precision_at_r'))
+### pytorch-metric-learning stuff ###
 
 best_acc = 0.0
 best_map = 0.0
-for epoch in range(1, num_epochs + 1):
+for epoch in range(num_epochs):
     print(f'Epoch {epoch}', flush=True)
 
     print(f'Training...', flush=True)
+    set_seed(SEED)
     train(model, loss_func, mining_func, device,
-          train_dl, optimizer, epoch)
+          train_dl, optimizer, epoch, writer)
 
     print(f'Evaluating...', flush=True)
-    acc, map = test(gallery_ds, query_ds, model, accuracy_calculator)
+    set_seed(SEED)
+    acc, map_r = test(gallery_ds, query_ds, model, accuracy_calculator)
+
+    writer.add_scalar('Validation Accuracy', acc, epoch)
+    writer.add_scalar('Validation MAP', map_r, epoch)
+
     if acc > best_acc:
-        torch.save(model.state_dict(), outdir + '/best_acc.pth')
-    if map > best_map:
-        torch.save(model.state_dict(), outdir + '/best_map.pth')
+        torch.save(model.state_dict(), outdir + f'/best_acc.pth')
+        best_acc = acc
+    if map_r > best_map:
+        torch.save(model.state_dict(), outdir + f'/best_map.pth')
+        best_map = map_r
 
     print('===================', flush=True)
+print('Best accuracy:', best_acc, flush=True)
+print('Best MAP:', best_map, flush=True)
