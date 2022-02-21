@@ -5,12 +5,13 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from pytorch_metric_learning import losses, distances, miners, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
-from dataloaders import BalancedBatchDataLoader
 
-from datasets import AIC2020Track2
 import sys
 import datetime
 
+from datasets import AIC2020Track2
+from dataloaders import BalancedBatchDataLoader
+from sim_tracker import SimilarityTracker
 from utils import set_deterministic, set_seed
 
 SEED = 3698
@@ -28,13 +29,15 @@ outdir = f'runs/{loss}_{margin}_{gamma}_{pos_level}_{neg_level}_{date}'
 writer = SummaryWriter(outdir)
 
 
-def train(model, loss_func, mining_func, device, train_loader, optimizer, epoch, writer):
+def train(model, loss_func, mining_func, device, train_loader, optimizer, epoch, writer, tracker):
     model.train()
     for batch_idx, (data, labels) in enumerate(train_loader):
         data, labels = data.to(device), labels.to(device)
         optimizer.zero_grad()
         embeddings = model(data)
         indices_tuple = mining_func(embeddings, labels)
+        with torch.no_grad():
+            tracker(embeddings, labels, indices_tuple)
         loss = loss_func(embeddings, labels, indices_tuple)
         loss.backward()
         optimizer.step()
@@ -71,17 +74,21 @@ device = torch.device("cuda")
 print('Loading data... ', end='', flush=True)
 set_seed(SEED)
 train_ds = AIC2020Track2(
-    'data/AIC21_Track2_ReID/image_train', 'list/reid_train.csv', True)
-train_dl = BalancedBatchDataLoader(train_ds, 2, 4)
+    'data/AIC21_Track2_ReID/image_train',
+    'list/reid_train.csv',
+    True, relabel=True)
+train_dl = BalancedBatchDataLoader(train_ds, 32, 4)
 
 set_seed(SEED)
 gallery_ds = AIC2020Track2(
-    'data/AIC21_Track2_ReID/image_train', 'list/reid_gallery_val.csv', False)
+    'data/AIC21_Track2_ReID/image_train',
+    'list/reid_gallery_val.csv', False)
 gallery_dl = torch.utils.data.DataLoader(gallery_ds, batch_size=256)
 
 set_seed(SEED)
 query_ds = AIC2020Track2(
-    'data/AIC21_Track2_ReID/image_train', 'list/reid_query_val.csv', False)
+    'data/AIC21_Track2_ReID/image_train',
+    'list/reid_query_val.csv', False)
 query_dl = torch.utils.data.DataLoader(query_ds, batch_size=256)
 print('Done!', flush=True)
 
@@ -98,7 +105,7 @@ set_seed(SEED)
 optimizer = optim.Adam(model.parameters(), lr=5e-5)
 print('Done!', flush=True)
 
-num_epochs = 25
+num_epochs = 30
 
 set_seed(SEED)
 distance = distances.CosineSimilarity()
@@ -114,6 +121,9 @@ elif loss == 'am':
         embedding_size=model.emb_dim,
         margin=margin, scale=gamma, distance=distance
     )
+
+set_seed(SEED)
+tracker = SimilarityTracker(writer, distance)
 
 set_seed(SEED)
 mining_func = miners.BatchEasyHardMiner(
@@ -137,7 +147,7 @@ for epoch in range(num_epochs):
     print(f'Training...', flush=True)
     set_seed(SEED)
     train(model, loss_func, mining_func, device,
-          train_dl, optimizer, epoch, writer)
+          train_dl, optimizer, epoch, writer, tracker)
 
     print(f'Evaluating...', flush=True)
     set_seed(SEED)
