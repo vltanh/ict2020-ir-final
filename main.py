@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from pytorch_metric_learning import losses, miners, testers
+from pytorch_metric_learning import losses, distances, miners, testers
 from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 from dataloaders import BalancedBatchDataLoader
 
@@ -72,7 +72,7 @@ print('Loading data... ', end='', flush=True)
 set_seed(SEED)
 train_ds = AIC2020Track2(
     'data/AIC21_Track2_ReID/image_train', 'list/reid_train.csv', True)
-train_dl = BalancedBatchDataLoader(train_ds, 128, 4)
+train_dl = BalancedBatchDataLoader(train_ds, 2, 4)
 
 set_seed(SEED)
 gallery_ds = AIC2020Track2(
@@ -101,13 +101,19 @@ print('Done!', flush=True)
 num_epochs = 25
 
 set_seed(SEED)
+distance = distances.CosineSimilarity()
+
+set_seed(SEED)
 if loss == 'triplet':
-    loss_func = losses.TripletMarginLoss(margin=margin)
+    loss_func = losses.TripletMarginLoss(margin=margin, distance=distance)
 elif loss == 'circle':
-    loss_func = losses.CircleLoss(m=margin, gamma=gamma)
+    loss_func = losses.CircleLoss(m=margin, gamma=gamma, distance=distance)
 elif loss == 'am':
     loss_func = losses.CosFaceLoss(
-        num_classes=train_ds.nclasses, embedding_size=model.emb_dim, margin=margin, scale=gamma)
+        num_classes=train_ds.nclasses,
+        embedding_size=model.emb_dim,
+        margin=margin, scale=gamma, distance=distance
+    )
 
 set_seed(SEED)
 mining_func = miners.BatchEasyHardMiner(
@@ -117,8 +123,11 @@ mining_func = miners.BatchEasyHardMiner(
 
 set_seed(SEED)
 accuracy_calculator = AccuracyCalculator(
-    include=('precision_at_1', 'mean_average_precision_at_r'))
-### pytorch-metric-learning stuff ###
+    include=(
+        'precision_at_1',
+        'mean_average_precision_at_r'
+    )
+)
 
 best_acc = 0.0
 best_map = 0.0
