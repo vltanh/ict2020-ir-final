@@ -7,7 +7,7 @@ from PIL import Image
 
 
 class AIC2020Track2(Dataset):
-    def __init__(self, root, path, train):
+    def __init__(self, root, path, train, relabel=False):
         self.train = train
 
         image_name, _, labels = zip(*list(csv.reader(open(path)))[1:])
@@ -15,19 +15,29 @@ class AIC2020Track2(Dataset):
                            for image_path in image_name]
 
         labels = list(map(int, labels))
+        labels_set = set(labels)
+        if relabel:
+            labels_mapping = {k: i for i, k in enumerate(labels_set)}
+        else:
+            labels_mapping = {k: k for _, k in enumerate(labels_set)}
+        labels = torch.tensor([labels_mapping[x] for x in labels])
 
-        # labels_set = set(labels)
-        # labels_mapping = {k: i for i, k in enumerate(labels_set)}
-
-        labels = torch.tensor([x for x in labels])
         self.nclasses = len(torch.unique(labels))
 
-        self.transform = tvtf.Compose([
-            tvtf.Resize((224, 224)),
-            tvtf.ToTensor(),
-            tvtf.Normalize(mean=[0.485, 0.456, 0.406],
-                           std=[0.229, 0.224, 0.225])
-        ])
+        if train:
+            self.transform = tvtf.Compose([
+                tvtf.Resize((224, 224)),
+                tvtf.ToTensor(),
+                tvtf.Normalize(mean=[0.485, 0.456, 0.406],
+                               std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            self.transform = tvtf.Compose([
+                tvtf.Resize((224, 224)),
+                tvtf.ToTensor(),
+                tvtf.Normalize(mean=[0.485, 0.456, 0.406],
+                               std=[0.229, 0.224, 0.225])
+            ])
 
         self.labels = labels
         self.data = self.image_name
