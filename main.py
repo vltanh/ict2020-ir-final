@@ -14,7 +14,7 @@ from dataloaders import BalancedBatchDataLoader
 from sim_tracker import SimilarityTracker
 from utils import set_deterministic, set_seed
 
-SEED = 3698
+SEED = int(sys.argv[6])
 set_deterministic()
 
 loss = sys.argv[1]
@@ -25,7 +25,7 @@ neg_level = sys.argv[5]
 
 date = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-outdir = f'runs/{loss}_{margin}_{gamma}_{pos_level}_{neg_level}_{date}'
+outdir = f'runs/{loss}_{margin}_{gamma}_{pos_level}_{neg_level}_{SEED}_{date}'
 writer = SummaryWriter(outdir)
 
 
@@ -37,7 +37,7 @@ def train(model, loss_func, mining_func, device, train_loader, optimizer, epoch,
         embeddings = model(data)
         indices_tuple = mining_func(embeddings, labels)
         with torch.no_grad():
-            tracker(embeddings, labels, indices_tuple)
+            tracker(embeddings, labels)
         loss = loss_func(embeddings, labels, indices_tuple)
         loss.backward()
         optimizer.step()
@@ -77,7 +77,7 @@ train_ds = AIC2020Track2(
     'data/AIC21_Track2_ReID/image_train',
     'list/reid_train.csv',
     True, relabel=True)
-train_dl = BalancedBatchDataLoader(train_ds, 32, 4)
+train_dl = BalancedBatchDataLoader(train_ds, 128, 4)
 
 set_seed(SEED)
 gallery_ds = AIC2020Track2(

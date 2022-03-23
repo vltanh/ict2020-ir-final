@@ -8,8 +8,6 @@ from datasets import AIC2020Track2
 
 import sys
 
-SEED = 3698
-
 weight_path = sys.argv[1]
 
 
@@ -54,5 +52,5 @@ accuracy_calculator = AccuracyCalculator(
 
 print(f'Evaluating...', flush=True)
 acc, map_r = test(gallery_ds, query_ds, model, accuracy_calculator)
-print('Accuracy:', acc, flush=True)
-print('MAP:', map_r, flush=True)
+
+print(f'{weight_path} | Accuracy: {acc} | MAP@R: {map_r}', flush=True)

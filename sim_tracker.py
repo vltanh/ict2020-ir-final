@@ -37,6 +37,10 @@ class SimilarityTracker:
                                ap_dists.detach().mean().cpu(), self.step)
         self.writer.add_scalar('Similarity/Negative',
                                an_dists.detach().mean().cpu(), self.step)
+        self.writer.add_scalar('Similarity/Positive STD',
+                               ap_dists.detach().std().cpu(), self.step)
+        self.writer.add_scalar('Similarity/Negative STD',
+                               an_dists.detach().std().cpu(), self.step)
         self.writer.add_scalar('Similarity/Difference',
                                (an_dists.detach().mean() - ap_dists.detach().mean()).cpu(), self.step)
         self.step += 1
