@@ -1,6 +1,7 @@
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import json
+import os
 
 root_dir = Path('data/AIC21_Track2_ReID')
 dataset = {x: root_dir / f'image_{x}'
@@ -34,4 +35,5 @@ for image_name, (veh_id, cam_id) in labels.items():
         print(f'{image_name} is not found in {veh_id}/{cam_id}')
         vehs[veh_id][cam_id].append(image_name)
 
-json.dump(vehs, open('data.json', 'w'))
+os.makedirs('list', exist_ok=True)
+json.dump(vehs, open('list/train_image_metadata.json', 'w'))
